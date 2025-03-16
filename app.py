@@ -24,6 +24,7 @@
 # SOFTWARE.
 
 import argparse
+import daemon
 import functools
 import json
 import os
@@ -73,15 +74,16 @@ VALID_EVENT_TYPES = frozenset(
 
 class WebhookHTTPServer(HTTPServer):
 
-    def __init__(self, port: int, pushover_app_token: str, pushover_user_key: str):
+    def __init__(
+        self, address: str, port: int, pushover_app_token: str, pushover_user_key: str
+    ):
 
-        server_address = ("", port)
         request_handler = functools.partial(
             WebhookRequestHandler, pushover_app_token, pushover_user_key
         )
 
-        print(f"Starting {self.__class__.__name__} on port {port}")
-        super().__init__(server_address, request_handler)
+        print(f"Starting {self.__class__.__name__} on {address}:{port}")
+        super().__init__((address, port), request_handler)
 
 
 class WebhookRequestHandler(BaseHTTPRequestHandler):
@@ -150,53 +152,33 @@ class WebhookRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def ShutdownHandler(http_server, unused_signo, unused_stack_frame):
-    print("Shutting down...")
-    http_server.shutdown()
-
-
 def main():
 
     # Parse the command line arguments into a context.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", dest="port", required=False, default=443)
-    parser.add_argument("--pushover_app_token", dest="pushover_app_token")
-    parser.add_argument("--pushover_user_key", dest="pushover_user_key")
     parser.add_argument(
-        "--config_json_path", dest="config_json_path", default="/config.json"
+        "--address", dest="address", required=True, default="127.0.0.1", type=str
+    )
+    parser.add_argument("--port", dest="port", required=True, default=443, type=int)
+    parser.add_argument(
+        "--pushover-app-token", dest="pushover_app_token", required=True, type=str
+    )
+    parser.add_argument(
+        "--pushover-user-key", dest="pushover_user_key", required=True, type=str
     )
     context = parser.parse_args()
 
-    # Check for explicit Pushover credentials.
-    if context.pushover_app_token and context.pushover_user_key:
-        pushover_app_token = context.pushover_app_token
-        pushover_user_key = context.pushover_user_key
-
-    # Try to pull them from config.json.
-    elif os.path.isfile(context.config_json_path):
-        with open(context.config_json_path) as f:
-            config_json = json.load(f)
-            pushover_app_token = config_json.get("pushover_app_token")
-            pushover_user_key = config_json.get("pushover_user_key")
-            if not pushover_app_token or not pushover_user_key:
-                print(f"No Pushover credentials provided in config.json")
-                return
-
-    else:
-        print(f"No Pushover credentials provided")
-        return
-
+    # Run the HTTPServer as a daemon.
     http_server = WebhookHTTPServer(
-        int(context.port), pushover_app_token, pushover_user_key
+        context.address,
+        context.port,
+        context.pushover_app_token,
+        context.pushover_user_key,
     )
-
-    # Configure a handler to kill the HTTPServer on container shutdown.
-    shutdown_handler = functools.partial(ShutdownHandler, http_server)
-    signal.signal(signal.SIGTERM, shutdown_handler)
-    signal.signal(signal.SIGINT, shutdown_handler)
-
-    http_server.serve_forever()
-    print("Done")
+    daemon_context = daemon.DaemonContext()
+    daemon_context.files_preserve = [http_server.fileno()]
+    with daemon_context:
+        http_server.serve_forever()
 
 
 if __name__ == "__main__":
