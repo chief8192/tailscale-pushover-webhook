@@ -159,7 +159,7 @@ def main():
 
     # Parse the command line arguments into a context.
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", dest="port", required=True, default=443)
+    parser.add_argument("--port", dest="port", required=False, default=443)
     parser.add_argument("--pushover_app_token", dest="pushover_app_token")
     parser.add_argument("--pushover_user_key", dest="pushover_user_key")
     parser.add_argument(
