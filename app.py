@@ -27,6 +27,7 @@ import argparse
 import functools
 import json
 import os
+import signal
 import sys
 
 from dateutil.parser import isoparse
@@ -149,6 +150,11 @@ class WebhookRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def ShutdownHandler(http_server, unused_signo, unused_stack_frame):
+    print("Shutting down...")
+    http_server.shutdown()
+
+
 def main():
 
     # Parse the command line arguments into a context.
@@ -180,11 +186,17 @@ def main():
         print(f"No Pushover credentials provided")
         return
 
-    httpd = WebhookHTTPServer(int(context.port), pushover_app_token, pushover_user_key)
-    httpd.serve_forever()
+    http_server = WebhookHTTPServer(
+        int(context.port), pushover_app_token, pushover_user_key
+    )
 
+    # Configure a handler to kill the HTTPServer on container shutdown.
+    shutdown_handler = functools.partial(ShutdownHandler, http_server)
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
 
-# TODO: docker shutdown handler
+    http_server.serve_forever()
+    print("Done")
 
 
 if __name__ == "__main__":
