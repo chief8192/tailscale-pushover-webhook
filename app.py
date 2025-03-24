@@ -75,15 +75,19 @@ VALID_EVENT_TYPES = frozenset(
 class WebhookHTTPServer(HTTPServer):
 
     def __init__(
-        self, address: str, port: int, pushover_app_token: str, pushover_user_key: str
+        self,
+        webhook_addr: str,
+        webhook_port: int,
+        pushover_app_token: str,
+        pushover_user_key: str,
     ):
 
         request_handler = functools.partial(
             WebhookRequestHandler, pushover_app_token, pushover_user_key
         )
 
-        print(f"Starting {self.__class__.__name__} on {address}:{port}")
-        super().__init__((address, port), request_handler)
+        print(f"Starting {self.__class__.__name__} on {webhook_addr}:{webhook_port}")
+        super().__init__((webhook_addr, webhook_port), request_handler)
 
 
 class WebhookRequestHandler(BaseHTTPRequestHandler):
@@ -146,7 +150,13 @@ class WebhookRequestHandler(BaseHTTPRequestHandler):
 
             # Print and send a push notification.
             print(f"Tailscale: {event_type} ({event.get('message')})")
-            Push(self.pushover_user_key, self.pushover_app_token, message, title=title)
+            if self.pushover_user_key and self.pushover_app_token:
+                Push(
+                    self.pushover_user_key,
+                    self.pushover_app_token,
+                    message,
+                    title=title,
+                )
 
         self.send_response(HTTPStatus.OK)
         self.end_headers()
@@ -154,26 +164,21 @@ class WebhookRequestHandler(BaseHTTPRequestHandler):
 
 def main():
 
-    # Parse the command line arguments into a context.
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--address", dest="address", required=True, default="127.0.0.1", type=str
-    )
-    parser.add_argument("--port", dest="port", required=True, default=443, type=int)
-    parser.add_argument(
-        "--pushover-app-token", dest="pushover_app_token", required=True, type=str
-    )
-    parser.add_argument(
-        "--pushover-user-key", dest="pushover_user_key", required=True, type=str
-    )
-    context = parser.parse_args()
+    # Load all the necessary config values from the environment.
+    webhook_addr = os.environ.get("WEBHOOK_ADDR", "")
+    webhook_port = os.environ.get("WEBHOOK_PORT", 443)
+    pushover_app_token = os.environ.get("PUSHOVER_APP_TOKEN")
+    pushover_user_key = os.environ.get("PUSHOVER_USER_KEY")
+
+    if not pushover_app_token or not pushover_user_key:
+        print("Error: Pushover credentials not provided")
 
     # Run the HTTPServer as a daemon.
     http_server = WebhookHTTPServer(
-        context.address,
-        context.port,
-        context.pushover_app_token,
-        context.pushover_user_key,
+        webhook_addr,
+        webhook_port,
+        pushover_app_token,
+        pushover_user_key,
     )
     daemon_context = daemon.DaemonContext()
     daemon_context.files_preserve = [http_server.fileno()]
